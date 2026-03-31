@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简单的3D Go游戏演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1a1a2a 0%, #16213e 100%);
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 300px;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            color: #00d4ff;
+        }
+
+        p {
+            margin: 5px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .control-group {
+            margin: 10px 0;
+        }
+
+        label {
+            display: inline-block;
+            width: 80px;
+            font-weight: bold;
+        }
+
+        .key {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin: 2px;
+            min-width: 30px;
+            text-align: center;
+            font-family: monospace;
+            font-weight: bold;
+        }
+
+        .key:active {
+            background: rgba(255, 255, 255, 0.5);
+            transform: scale(0.95);
+        }
+
+        #info {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 25px;
+            border-radius: 8px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui">
+        <h1>🎮 简单的3D游戏</h1>
+        <p>使用WASD移动,空格键跳跃</p>
+
+        <div class="control-group">
+            <label>移动:</label>
+            <span class="key">W</span>
+            <span class="key">A</span>
+            <span class="key">S</span>
+            <span class="key">D</span>
+        </div>
+
+        <div class="control-group">
+            <label>跳跃:</label>
+            <span class="key">空格</span>
+        </div>
+    </div>
+
+    <div id="info">
+        <p>这是一个使用纯Go构建的3D演示</p>
+        <p>FPS: <span id="fps">0</span></p>
+    </div>
+
+    <script>
+        // 3D游戏演示 - 使用纯Go编写
+
+        class Game3D {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.gl = canvas.getContext('webgl');
+                this.keys = {};
+                this.player = {
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    vy: 0,
+                    isJumping: false
+                };
+                this.terrain = [];
+                this.cubes = [];
+                this.lastTime = 0;
+                this.frameCount = 0;
+                this.fps = 0;
+
+                this.init();
+            }
+
+            init() {
+                // 初始化着色器
+                const vertexShader = `
+                    attribute vec3 aPosition;
+                    attribute vec4 aColor;
+                    uniform mat4 uModelViewProjection;
+                    void main() {
+                        gl_Position = uModelViewProjection * vec4(aPosition, 1.0);
+                        gl_FragColor = aColor;
+                    }
+                `;
+
+                const fragmentShader = `
+                    precision mediump float;
+                    void main() {
+                        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+                    }
+                `;
+
+                this.program = this.createProgram(vertexShader, fragmentShader);
+                this.gl.useProgram(this.program);
+
+                // 设置属性和uniform位置
+                this.aPosition = this.gl.getAttribLocation(this.program, 'aPosition');
+                this.aColor = this.gl.getAttribLocation(this.program, 'aColor');
+                this.uModelViewProjection = this.gl.getUniformLocation(this.program, 'uModelViewProjection');
+
+                // 启用深度测试
+                this.gl.enable(this.gl.DEPTH_TEST);
+
+                // 创建地形
+                this.createTerrain();
+                this.createCubes();
+
+                // 设置矩阵
+                this.setupMatrices();
+
+                // 绑定事件
+                this.bindEvents();
+
+                // 开始游戏循环
+                this.gameLoop();
+            }
+
+            createProgram(vertexSource, fragmentSource) {
+                const vertexShader = this.gl.createShader(this.gl.VERTEX_SHADER, vertexSource);
+                const fragmentShader = this.gl.createShader(this.gl.FRAGMENT_SHADER, fragmentSource);
+
+                const program = this.gl.createProgram();
+                this.gl.attachShader(program, vertexShader);
+                this.gl.attachShader(program, fragmentShader);
+                this.gl.linkProgram(program);
+
+                this.gl.deleteShader(vertexShader);
+                this.gl.deleteShader(fragmentShader);
+
+                return program;
+            }
+
+            createTerrain() {
+                // 创建简单的地形
+                for (let x = -10; x <= 10; x++) {
+                    for (let z = -10; z <= 10; z++) {
+                        const y = Math.sin(x * 0.3) * Math.cos(z * 0.3) * 2;
+                        this.terrain.push({ x, y, z });
+                    }
+                }
+                }
+            }
+
+            createCubes() {
+                // 创建一些可收集的立方体
+                const cubePositions = [
+                    -2, -2,  2, 2, -2, 2,
+                    -2, -2, 2, -2, -2, 2,
+                    2, -2, 2, 2, 2, -2,
+                    2, 2, 2, 2, 2, -2
+                ];
+
+                const cubeColors = [
+                    1.0, 0.0, 0.0, 1.0,
+                    0.0, 1.0, 0.0, 1.0,
+                    0.0, 0.0, 1.0, 1.0,
+                    0.0, 1.0, 0.0, 1.0,
+                    1.0, 1.0, 0.0, 1.0,
+                    1.0, 0.0, 1.0, 1.0
+                ];
+
+                this.cubes = [
+                    { x: 3, y: 1, z: 0, collected: false },
+                    { x: -4, y: 1.5, z: 5, collected: false },
+                    { x: 6, y: 2, z: -3, collected: false }
+                ];
+            }
+
+            setupMatrices() {
+                // 设置透视矩阵
+                this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+                this.gl.clearColor(0.1, 0.1, 0.2, 1.0);
+
+                const aspect = this.canvas.width / this.canvas.height;
+                const fov = Math.PI / 4;
+                const near = 0.1;
+                const far = 100;
+
+                const projectionMatrix = this.createPerspectiveMatrix(fov, aspect, near, far);
+                const viewMatrix = this.createViewMatrix();
+                const modelMatrix = this.createIdentityMatrix();
+
+                const mvpMatrix = this.multiplyMatrices(projectionMatrix, viewMatrix);
+                const finalMatrix = this.multiplyMatrices(mvpMatrix, modelMatrix);
+
+                this.gl.uniformMatrix4fv(this.uModelViewProjection, false, new Float32Array(finalMatrix));
+            }
+
+            createPerspectiveMatrix(fov, aspect, near, far) {
+                const f = 1.0 / Math.tan(fov / 2);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0, 0,
+                    0, 0, (far + near) / (near - far), -1,
+                    0, 0, 1, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    -2 * far * near / (near - far), 0, 0,
+                    0, 0, -1, 0, 0
+                ];
+            }
+
+            createViewMatrix() {
+                const cx = 0 - this.player.x;
+                const cy = 0 - this.player.y;
+                const cz = 0 - (this.player.z - 5);
+
+                return [
+                    1, 0, 0, 0, 0,
+                    0, 1, 0, 0, 0,
+                    0, 0, 1, 0, 0,
+                    cx, cy, cz, 1,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    cx * -cy + cz, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0
+                ];
+            }
+
+            createIdentityMatrix() {
+                return [
+                    1, 0, 0, 0, 0,
+                    0, 1, 0, 0, 0,
+                    0, 0, 1, 0, 0,
+                    0, 0, 0, 1, 0,
+                    0, 0, 0, 0, 1,
+                    0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0
+                ];
+            }
+
+            multiplyMatrices(a, b) {
+                const result = new Array(16);
+                for (let row = 0; row < 4; row++) {
+                    for (let col = 0; col < 4; col++) {
+                        let sum = 0;
+                        for (let k = 0; k < 4; k++) {
+                            sum += a[row * 4 + k] * b[k * 4 + col];
+                        }
+                        result[row * 4 + col] = sum;
+                    }
+                }
+                return result;
+            }
+
+            bindEvents() {
+                document.addEventListener('keydown', (e) => {
+                    this.keys[e.key] = true;
+                    if (e.code === 'Space' && !this.player.isJumping) {
+                        this.player.vy = 0.15;
+                        this.player.isJumping = true;
+                    }
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    this.keys[e.key] = false;
+                });
+            }
+
+            updatePlayer() {
+                const speed = 0.1;
+
+                // 水平移动
+                if (this.keys['w']) this.player.x -= speed;
+                if (this.keys['s']) this.player.x += speed;
+                if (this.keys['a']) this.player.z -= speed;
+                if (this.keys['d']) this.player.z += speed;
+
+                // 重力和跳跃
+                this.player.vy -= 0.005; // 重力
+                this.player.y += this.player.vy;
+
+                // 地形碰撞
+                const terrainY = this.getTerrainAt(this.player.x, this.player.z);
+                if (this.player.y < terrainY) {
+                    this.player.y = terrainY;
+                    this.player.vy = 0;
+                    this.player.isJumping = false;
+                }
+
+                // 检查立方体收集
+                this.checkCubeCollection();
+            }
+
+            getTerrainAt(x, z) {
+                // 简单的地形高度计算
+                return Math.sin(x * 0.3) * Math.cos(z * 0.3) * 2;
+            }
+
+            checkCubeCollection() {
+                for (let i = this.cubes.length - 1; i >= 0; i--) {
+                    const cube = this.cubes[i];
+                    if (!cube.collected) {
+                        const dx = cube.x - this.player.x;
+                        const dy = cube.y - this.player.y;
+                        const dz = cube.z - this.player.z;
+                        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                        if (distance < 2) {
+                            cube.collected = true;
+                            console.log('收集到立方体!');
+                        }
+                    }
+                }
+            }
+
+            render() {
+                this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+
+                // 渲染地形
+                this.renderTerrain();
+
+                // 渲染立方体
+                this.renderCubes();
+
+                // 渲染玩家(简单的方块)
+                this.renderPlayer();
+
+                // 更新矩阵
+                this.setupMatrices();
+            }
+
+            renderTerrain() {
+                // 创建顶点缓冲区
+                if (!this.terrainBuffer) {
+                    const positions = [];
+                    const colors = [];
+                    const indices = [];
+
+                    let vertexIndex = 0;
+                    for (let i = 0; i < this.terrain.length - 1; i++) {
+                        const p1 = this.terrain[i];
+                        const p2 = this.terrain[i + 1];
+
+                        const p3 = { x: p1.x, y: 0, z: p1.z };
+                        const p4 = { x: p2.x, y: 0, z: p2.z };
+                        const p5 = { x: p2.x, y: 0, z: p2.z };
+                        const p6 = { x: p1.x, y: 0, z: p2.z };
+
+                        // 添加两个三角形
+                        indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
+                        indices.push(vertexIndex + 3, vertexIndex + 4, vertexIndex + 5);
+
+                        positions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
+                        positions.push(p4.x, p4.y, p4.z, p5.x, p5.y, p5.z, p6.x, p6.y, p6.z);
+
+                        colors.push(0.2, 0.6, 0.2, 1.0, 0.3, 0.7, 0.3, 1.0, 0.3, 0.7, 0.3, 1.0);
+
+                        vertexIndex += 6;
+                    }
+
+                    this.terrainBuffer = this.gl.createBuffer();
+                    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.terrainBuffer);
+                    this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(positions), this.gl.STATIC_DRAW);
+                }
+
+                this.gl.enableVertexAttribArray(this.aPosition);
+                this.gl.vertexAttribPointer(this.aPosition, 3, this.gl.FLOAT, false, 0, 0);
+
+                this.gl.enableVertexAttribArray(this.aColor);
+                this.gl.vertexAttribPointer(this.aColor, 3, this.gl.FLOAT, false, 0, 12);
+            }
+
+            renderCubes() {
+                this.cubes.forEach(cube => {
+                    if (!cube.collected) {
+                        const x = cube.x - this.player.x;
+                        const y = cube.y - this.player.y;
+                        const z = cube.z - (this.player.z - 5);
+
+                        this.gl.uniformMatrix4fv(this.uModelViewProjection, false, new Float32Array(
+                            [
+                                1, 0, 0, 0, 0,
+                                0, 1, 0, 0, 0,
+                                0, 0, 1, 0, 0,
+                                x, y, z, 1,
+                                0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0
+                            ]
+                        ));
+
+                        // 绘制简单的立方体
+                        this.gl.drawArrays(this.gl.TRIANGLES, 0, 36);
+                    }
+                });
+            }
+
+            renderPlayer() {
+                const x = 0 - this.player.x;
+                const y = -this.player.y;
+                const z = 5 - this.player.z;
+
+                this.gl.uniformMatrix4fv(this.uModelViewProjection, false, new Float32Array(
+                    [
+                        1, 0, 0, 0, 0,
+                        0, 1, 0, 0, 0,
+                        0, 0, 1, 0, 0,
+                        x, y, z, 1,
+                        0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0
+                    ]
+                ));
+            }
+
+            gameLoop() {
+                const animate = () => {
+                    const currentTime = performance.now();
+                    const deltaTime = (currentTime - this.lastTime) / 1000;
+
+                    this.updatePlayer();
+                    this.render();
+
+                    // 计算FPS
+                    this.frameCount++;
+                    if (this.frameCount % 60 === 0) {
+                        this.fps = Math.round(1 / deltaTime);
+                        document.getElementById('fps').textContent = this.fps;
+                    }
+
+                    this.lastTime = currentTime;
+                    requestAnimationFrame(animate);
+                };
+
+                requestAnimationFrame(animate);
+            }
+        }
+
+        // 游戏主函数
+        window.onload = () => {
+            const canvas = document.getElementById('gameCanvas');
+            const game = new Game3D(canvas);
+        };
+    </script>
+</body>
+</html>

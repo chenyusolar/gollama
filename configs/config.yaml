@@ -1,0 +1,50 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+llama:
+  binary: "./llama.cpp/llama-server.exe"
+  context_size: 2048
+  prompt_batch: 512
+  generation_batch: 32
+  gpu_layers: 100
+
+# GPU Configuration
+gpu:
+  memory_gb: 8
+  auto_detect: true
+  gpu_ids: [0]
+
+models:
+  - name: "llama-7b"
+    path: "./models/llama-7b-chat.Q4_K_M.gguf"
+    instances: 1
+    context_size: 2048
+    priority: 1
+
+pool:
+  base_port: 8081
+  health_check_interval: 5s
+
+batcher:
+  max_wait_ms: 100
+  max_batch_size: 512
+  queue_size: 100
+
+kv_cache:
+  enabled: true
+  cache_dir: "./cache"
+  max_size_mb: 1024
+  max_age_hours: 24
+
+# Multimodal Configuration (Optional)
+multimodal:
+  comfyui:
+    enabled: false
+    host: "127.0.0.1"
+    port: 8188
+    output_dir: "./output/images"
+  ffmpeg:
+    enabled: false
+    binary_path: "./ffmpeg/bin/ffmpeg.exe"
+    output_dir: "./output/videos"
